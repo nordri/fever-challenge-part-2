@@ -1,6 +1,10 @@
 resource "aws_api_gateway_rest_api" "events" {
   name        = "access-events"
   description = "Access event ingestion API"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
 }
 
 resource "aws_api_gateway_resource" "events" {
@@ -14,6 +18,8 @@ resource "aws_api_gateway_method" "post_events" {
   resource_id   = aws_api_gateway_resource.events.id
   http_method   = "POST"
   authorization = "NONE"
+
+  api_key_required = true
 }
 
 resource "aws_api_gateway_integration" "sqs" {
@@ -24,30 +30,32 @@ resource "aws_api_gateway_integration" "sqs" {
   type                    = "AWS"
   integration_http_method = "POST"
 
-  uri = "arn:aws:apigateway:${var.aws_region}:sqs:path/000000000000/${aws_sqs_queue.events.name}"
-
+  uri         = "arn:aws:apigateway:${var.aws_region}:sqs:path/000000000000/${aws_sqs_queue.events.name}"
   credentials = aws_iam_role.api_gateway.arn
 
   request_parameters = {
     "integration.request.header.Content-Type" = "'application/x-www-form-urlencoded'"
   }
 
+  # Floci 1.5.34 requires QueueUrl explicitly for the SQS SendMessage
+  # integration. Terraform injects the provisioned queue URL here.
   request_templates = {
     "application/json" = "Action=SendMessage&QueueUrl=$util.urlEncode(\"${aws_sqs_queue.events.url}\")&MessageBody=$util.urlEncode($input.body)"
   }
 
   passthrough_behavior = "NEVER"
 
-  # Floci 1.5.34 applies these API Gateway integration settings but does not
-# return them correctly on read-back, causing a perpetual Terraform diff.
-lifecycle {
-  ignore_changes = [
-    credentials,
-    request_parameters,
-    request_templates,
-    timeout_milliseconds,
-  ]
-}
+  # Floci applies these attributes correctly but does not return them
+  # consistently through GetIntegration, which otherwise causes
+  # perpetual Terraform diffs.
+  lifecycle {
+    ignore_changes = [
+      credentials,
+      request_parameters,
+      request_templates,
+      timeout_milliseconds,
+    ]
+  }
 }
 
 resource "aws_api_gateway_method_response" "accepted" {
@@ -72,15 +80,37 @@ resource "aws_api_gateway_integration_response" "accepted" {
   depends_on = [
     aws_api_gateway_integration.sqs
   ]
+
+  # Same Floci read-back limitation as the integration above.
   lifecycle {
-  ignore_changes = [
-    response_templates,
-  ]
+    ignore_changes = [
+      response_templates,
+    ]
+  }
 }
+
+# Use declared configuration rather than provider-computed IDs so the
+# deployment trigger remains stable during terraform apply.
+locals {
+  api_deployment_config = {
+    resource_path    = "events"
+    http_method      = "POST"
+    api_key_required = true
+    integration_type = "AWS"
+    queue_name       = aws_sqs_queue.events.name
+  }
 }
 
 resource "aws_api_gateway_deployment" "events" {
   rest_api_id = aws_api_gateway_rest_api.events.id
+
+  triggers = {
+    redeployment = sha1(jsonencode(local.api_deployment_config))
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   depends_on = [
     aws_api_gateway_integration.sqs,
@@ -92,4 +122,12 @@ resource "aws_api_gateway_stage" "events" {
   deployment_id = aws_api_gateway_deployment.events.id
   rest_api_id   = aws_api_gateway_rest_api.events.id
   stage_name    = "local"
+}
+
+resource "aws_api_gateway_usage_plan" "events" {
+  name = "access-events"
+  api_stages {
+    api_id = aws_api_gateway_rest_api.events.id
+    stage  = aws_api_gateway_stage.events.stage_name
+  }
 }

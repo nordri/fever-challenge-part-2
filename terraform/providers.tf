@@ -13,12 +13,12 @@ provider "aws" {
   region = var.aws_region
 
   endpoints {
-    sqs        = var.aws_endpoint
-    lambda     = var.aws_endpoint
-    iam        = var.aws_endpoint
-    dynamodb   = var.aws_endpoint
-    s3         = var.aws_endpoint
-    apigateway = var.aws_endpoint
+    sqs            = var.aws_endpoint
+    lambda         = var.aws_endpoint
+    iam            = var.aws_endpoint
+    dynamodb       = var.aws_endpoint
+    s3             = var.aws_endpoint
+    apigateway     = var.aws_endpoint
     secretsmanager = var.aws_endpoint
   }
 
