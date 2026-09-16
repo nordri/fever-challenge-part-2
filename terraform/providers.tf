@@ -19,6 +19,7 @@ provider "aws" {
     dynamodb   = var.aws_endpoint
     s3         = var.aws_endpoint
     apigateway = var.aws_endpoint
+    secretsmanager = var.aws_endpoint
   }
 
   skip_credentials_validation = true
