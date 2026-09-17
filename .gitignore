@@ -6,3 +6,8 @@
 
 # Python
 **/package/
+
+# Certs
+proxy/certs/*
+!proxy/certs/.gitkeep
+
