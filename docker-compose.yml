@@ -6,3 +6,15 @@ services:
       - "4566:4566"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  proxy:
+    image: nginx:1.29-alpine
+    ports:
+      - "8443:443"
+    environment:
+      API_ID: ${API_ID}
+    volumes:
+      - ./proxy/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./proxy/certs:/etc/nginx/certs:ro
+    depends_on:
+      - floci        
