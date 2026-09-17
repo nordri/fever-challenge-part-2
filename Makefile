@@ -30,6 +30,7 @@ lambda:
 
 terraform:
 	@echo "==> Applying Terraform"
+	@$(MAKE) -C terraform init
 	@$(MAKE) -C terraform apply
 
 api-key:
