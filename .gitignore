@@ -12,3 +12,7 @@
 proxy/certs/*
 !proxy/certs/.gitkeep
 
+# Logs
+**/dump-cloud/
+**/logs/
+
