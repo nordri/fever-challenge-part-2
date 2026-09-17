@@ -6,6 +6,7 @@
 
 # Python
 **/package/
+**/build/
 
 # Certs
 proxy/certs/*
