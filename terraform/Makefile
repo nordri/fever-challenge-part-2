@@ -1,4 +1,4 @@
-.PHONY: format validate plan apply destroy
+.PHONY: init format validate plan apply destroy
 
 TF_CREDENTIALS = \
 	$(if $(AWS_ACCESS_KEY_ID),TF_VAR_aws_access_key="$(AWS_ACCESS_KEY_ID)") \
