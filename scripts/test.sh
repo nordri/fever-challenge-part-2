@@ -17,7 +17,54 @@ LOG_DIR="logs"
 HTTP_EVIDENCE="${LOG_DIR}/https-request-response.txt"
 
 mkdir -p "$LOG_DIR"
-: > "$HTTP_EVIDENCE"
+{
+    printf 'HTTP TEST REPORT\n'
+    printf 'Event ID: %s\n' "$EVENT_ID"
+    printf 'Started:  %s\n' "$TIMESTAMP"
+    printf 'Endpoint: POST %s\n' "$ENDPOINT"
+    printf 'TLS:      verified with %s\n\n' "$CA_CERT"
+} > "$HTTP_EVIDENCE"
+
+CASE_NUMBER=0
+
+format_body() {
+    python3 -c '
+import json
+import sys
+import textwrap
+
+raw = sys.stdin.read()
+try:
+    rendered = json.dumps(json.loads(raw), indent=2, ensure_ascii=False)
+except ValueError:
+    rendered = raw or "(empty body)"
+print(textwrap.indent(rendered, "    "))
+'
+}
+
+log_http_case() {
+    local title="$1" expected="$2" actual="$3"
+    local authentication="$4" content_type="$5" payload="$6"
+    local result="FAIL"
+    CASE_NUMBER=$((CASE_NUMBER + 1))
+    if [[ "$actual" == "$expected" ]]; then
+        result="PASS"
+    fi
+
+    {
+        printf '%s\n' '========================================================================'
+        printf '%02d | %s | %s\n' "$CASE_NUMBER" "$result" "$title"
+        printf '%s\n\n' '------------------------------------------------------------------------'
+        printf '  HTTP:           %s (expected %s)\n' "$actual" "$expected"
+        printf '  Authentication: %s\n' "$authentication"
+        printf '  Content-Type:   %s\n' "$content_type"
+        printf '\n  Request body:\n'
+        printf '%s' "$payload" | format_body
+        printf '\n  Response body:\n'
+        format_body < "$RESPONSE_FILE"
+        printf '\n'
+    } >> "$HTTP_EVIDENCE"
+}
 
 RESPONSE_FILE=$(mktemp)
 trap 'rm -f "$RESPONSE_FILE"' EXIT
@@ -59,17 +106,8 @@ STATUS=$(
         "$ENDPOINT"
 )
 
-{
-    echo "=== Request without API key ==="
-    echo "POST $ENDPOINT"
-    echo "Event ID: $EVENT_ID"
-    echo
-    echo "HTTP status: $STATUS"
-    echo "Response:"
-    cat "${RESPONSE_FILE}"
-    echo
-    echo
-} >> "$HTTP_EVIDENCE"
+log_http_case "Request without API key" 403 "$STATUS" \
+    "none" "application/json" "$PAYLOAD"
 
 if [[ "$STATUS" != "403" ]]; then
     echo "ERROR: Expected HTTP 403 without API key, got $STATUS" >&2
@@ -77,6 +115,43 @@ if [[ "$STATUS" != "403" ]]; then
 fi
 
 echo "    Authentication rejected correctly: HTTP 403"
+
+assert_invalid_body() {
+    local description="$1"
+    local payload="$2"
+    local content_type="${3:-application/json}"
+    local status
+
+    echo "==> Testing $description"
+    status=$(
+        curl --silent --show-error \
+            --output "$RESPONSE_FILE" \
+            --write-out "%{http_code}" \
+            --cacert "$CA_CERT" \
+            --header "Content-Type: $content_type" \
+            --header "x-api-key: ${API_KEY}" \
+            --data-binary "$payload" \
+            "$ENDPOINT"
+    )
+
+    log_http_case "$description" 400 "$status" \
+        "x-api-key (redacted)" "$content_type" "$payload"
+
+    if [[ "$status" != "400" ]]; then
+        echo "ERROR: Expected HTTP 400 for $description, got $status" >&2
+        exit 1
+    fi
+    echo "    Invalid body rejected correctly: HTTP 400"
+}
+
+# Use a valid API key so authentication cannot mask missing body validation.
+assert_invalid_body "malformed JSON" '{"event_id":'
+assert_invalid_body "missing required fields" '{}'
+assert_invalid_body "incorrect field type" \
+    "{\"event_id\":123,\"timestamp\":\"${TIMESTAMP}\",\"domain\":\"test.local\",\"client_ip\":\"192.0.2.100\"}"
+assert_invalid_body "non-object JSON" '[]'
+assert_invalid_body "malformed JSON with charset" '{"event_id":' \
+    'application/json; charset=utf-8'
 
 echo "==> Testing authenticated HTTPS request"
 
@@ -92,21 +167,8 @@ STATUS=$(
         "$ENDPOINT"
 )
 
-{
-    echo "=== Authenticated HTTPS request ==="
-    echo "POST $ENDPOINT"
-    echo "TLS verification: enabled"
-    echo "CA certificate: $CA_CERT"
-    echo "Authentication: x-api-key (value redacted)"
-    echo
-    echo "Payload:"
-    echo "$PAYLOAD"
-    echo
-    echo "HTTP status: $STATUS"
-    echo "Response:"
-    cat "${RESPONSE_FILE}"
-    echo
-} >> "$HTTP_EVIDENCE"
+log_http_case "Authenticated HTTPS request" 202 "$STATUS" \
+    "x-api-key (redacted)" "application/json" "$PAYLOAD"
 
 if [[ "$STATUS" != "202" ]]; then
     echo "ERROR: Expected HTTP 202, got $STATUS" >&2
@@ -206,4 +268,3 @@ echo "Evidence: $HTTP_EVIDENCE"
 echo
 echo "All tests passed"
 echo "Event ID: $EVENT_ID"
-

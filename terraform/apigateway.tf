@@ -13,13 +13,31 @@ resource "aws_api_gateway_resource" "events" {
   path_part   = "events"
 }
 
+resource "aws_api_gateway_model" "event" {
+  rest_api_id  = aws_api_gateway_rest_api.events.id
+  name         = "AccessEvent"
+  content_type = "application/json"
+  schema       = jsonencode(local.event_schema)
+}
+
+resource "aws_api_gateway_request_validator" "event" {
+  rest_api_id                 = aws_api_gateway_rest_api.events.id
+  name                        = "validate-event-body"
+  validate_request_body       = true
+  validate_request_parameters = false
+}
+
 resource "aws_api_gateway_method" "post_events" {
   rest_api_id   = aws_api_gateway_rest_api.events.id
   resource_id   = aws_api_gateway_resource.events.id
   http_method   = "POST"
   authorization = "NONE"
 
-  api_key_required = true
+  api_key_required     = true
+  request_validator_id = aws_api_gateway_request_validator.event.id
+  request_models = {
+    "application/json" = aws_api_gateway_model.event.name
+  }
 }
 
 resource "aws_api_gateway_integration" "sqs" {
@@ -92,12 +110,30 @@ resource "aws_api_gateway_integration_response" "accepted" {
 # Use declared configuration rather than provider-computed IDs so the
 # deployment trigger remains stable during terraform apply.
 locals {
+  event_schema = {
+    "$schema" = "http://json-schema.org/draft-04/schema#"
+    type      = "object"
+    required  = ["event_id", "timestamp", "domain", "client_ip"]
+    properties = {
+      event_id  = { type = "string", minLength = 1 }
+      timestamp = { type = "string", minLength = 1 }
+      domain    = { type = "string", minLength = 1 }
+      client_ip = { type = "string", minLength = 1 }
+    }
+  }
+
   api_deployment_config = {
     resource_path    = "events"
     http_method      = "POST"
     api_key_required = true
     integration_type = "AWS"
     queue_name       = aws_sqs_queue.events.name
+    event_schema     = local.event_schema
+    request_validation = {
+      body       = aws_api_gateway_request_validator.event.validate_request_body
+      parameters = aws_api_gateway_request_validator.event.validate_request_parameters
+      models     = aws_api_gateway_method.post_events.request_models
+    }
   }
 }
 

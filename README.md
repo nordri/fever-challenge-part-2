@@ -167,6 +167,19 @@ make test
 
 The automated test performs an end-to-end verification of the deployed system.
 
+Before accepting the valid event, it sends authenticated requests containing
+malformed JSON, missing required fields, an incorrect field type, and a JSON
+array. Each must return HTTP `400`. A malformed JSON request with
+`Content-Type: application/json; charset=utf-8` also checks the default model.
+These checks fail if the emulator accepts an invalid body.
+
+The API Gateway request validator uses a JSON Schema model requiring an object
+with non-empty string fields `event_id`, `timestamp`, `domain`, and `client_ip`.
+This validates structure; it does not validate timestamp, domain, or IP semantics.
+The model is attached through `$default` so content-type variations do not skip
+body validation. Changes to the schema or validation configuration trigger a new
+API deployment.
+
 It checks:
 
 1. an HTTPS request **without** an API key is rejected with HTTP `403`;
